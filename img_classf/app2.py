@@ -1,6 +1,10 @@
 #The usual suspects
 import numpy as np
+import pandas as pd
 import pickle
+import datetime
+import queue
+from typing import List, NamedTuple
 
 #Model handling
 import torch
@@ -97,49 +101,75 @@ transforms_test = transforms.Compose([
 
 format_list = ["Video Stream", "File Upload"]
 with st.sidebar:
-    st.title("")
-    format_name = st.selectbox("Select your tasks:", format_list)
-st.title(format_name)
+    format_name = st.selectbox("Select your recognition mode:", format_list)
 
 if format_name == format_list[0]:
-    conf_threshold = st.slider("Confidence threshold", 0.0, 1.0, 0.5, 0.05)
+    st.title("Welcome to the live video feed recognition mode! 🧇")
+    st.text("Insert instructions here")
+    #conf_threshold = st.slider("Confidence threshold", 0.0, 1.0, 0.5, 0.05)
+    ice_complete_time = datetime.datetime.now()
+
+    class Detection(NamedTuple):
+        label: str
+        conf: float
+        b_box: tuple
+    result_q: "queue.Queue[List[Detection]]" = queue.Queue()
 
     def video_frame_callback(frame: av.VideoFrame): 
-        frame = frame.to_image()
-        frame = cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2BGR)
-        frame = imutils.resize(frame, width=400)
-        orig = frame.copy()
-        frame = cv2.resize(frame, (224, 224))
-        frame = frame.transpose((2, 0, 1))  
-        frame = torch.from_numpy(frame)
-        frame = transforms_test(frame).to(CONFIGS['DEVICE'])
-        frame = frame.unsqueeze(0)
-        # run inference
-        (boxPreds, labelPreds_total) = model(frame)
-        (startX, startY, endX, endY) = boxPreds[0]
-        # determine the class label with the largest predicted probability
-        labelPreds_total = torch.nn.Softmax(dim=-1)(labelPreds_total)
-        i_total = labelPreds_total.argmax(dim=-1).cpu()
-        label_total = le_total.inverse_transform(i_total)[0]
-        label = label_total
-        
-        orig = imutils.resize(orig, width=600)
-        (h, w) = orig.shape[:2]
-        startX = int(startX * w)
-        startY = int(startY * h)
-        endX = int(endX * w)
-        endY = int(endY * h)
+        global ice_complete_time
+        if webrtc_ctx.state.playing and ice_complete_time is None:
+            ice_complete_time = datetime.datetime.now()
+            print("ICE connection state complete time is:", ice_complete_time)
+        now = datetime.datetime.now()
+        while ice_complete_time+datetime.timedelta(0, 4) > now:
+            frame = frame.to_image()
+            frame = cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2BGR)
+            frame = imutils.resize(frame, width=400)
+            orig = frame.copy()
+            frame = cv2.resize(frame, (224, 224))
+            frame = frame.transpose((2, 0, 1))  
+            frame = torch.from_numpy(frame)
+            frame = transforms_test(frame).to(CONFIGS['DEVICE'])
+            frame = frame.unsqueeze(0)
+            # run inference
+            (boxPreds, labelPreds_total) = model(frame)
+            (startX, startY, endX, endY) = boxPreds[0]
+            # determine the class label with the largest predicted probability
+            labelPreds_total = torch.nn.Softmax(dim=-1)(labelPreds_total)
+            i_total = labelPreds_total.argmax(dim=-1).cpu()
+            label_total = le_total.inverse_transform(i_total)[0]
+            label = label_total
+            #push label into queues
+            
+            orig = imutils.resize(orig, width=600)
+            (h, w) = orig.shape[:2]
+            startX = int(startX * w)
+            startY = int(startY * h)
+            endX = int(endX * w)
+            endY = int(endY * h)
 
-        y = startY - 10 if startY - 10 > 10 else startY + 10
-        cv2.putText(orig, label, (startX, y), cv2.FONT_HERSHEY_SIMPLEX,
-        0.65, (0, 255, 0), 2)
-        cv2.rectangle(orig, (startX, startY), (endX, endY),
-        (0, 255, 0), 2)
+            y = startY - 10 if startY - 10 > 10 else startY + 10
+            cv2.putText(orig, label, (startX, y), cv2.FONT_HERSHEY_SIMPLEX,
+            0.65, (0, 255, 0), 2)
+            cv2.rectangle(orig, (startX, startY), (endX, endY),
+            (0, 255, 0), 2)
 
-        orig = cv2.cvtColor(orig, cv2.COLOR_BGR2RGB)
-        orig = Image.fromarray(orig)
-        return av.VideoFrame.from_image(orig)
+            orig = cv2.cvtColor(orig, cv2.COLOR_BGR2RGB)
+            orig = Image.fromarray(orig)
 
+            #put detections from this round into queue
+            detection = Detection(
+                label = label, 
+                conf = 0,
+                b_box = (startX, startY, endX, endY)
+                )
+            result_q.put(detection)
+            return av.VideoFrame.from_image(orig)
+        else: 
+            #calculate the most frequent label 
+            #redraw with the most frequent label
+            return None #return the drawn image instead of none
+    
     webrtc_ctx = webrtc_streamer(
         key="object-detection",
         mode=WebRtcMode.SENDRECV,
@@ -148,6 +178,21 @@ if format_name == format_list[0]:
         rtc_configuration=RTC_CONFIGURATION,
         async_processing=True,
     )
+
+    if st.checkbox("Show the detected labels", value = True):
+        result = []
+        if webrtc_ctx.state.playing:
+            labels_placeholder = st.empty()
+            while True:
+                result.append(result_q.get()[0])
+                #display the most frequent value at the time of reading the frame
+                #st.write(result_q.get())
+                labels_placeholder.write(max(set(result), key=result.count))
+        else:
+            pass
+
+
+    #test = st.write(results)
 
 if format_name == format_list[1]: 
     st.file_uploader("Upload Your Photos Here:")
