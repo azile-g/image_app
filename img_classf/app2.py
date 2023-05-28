@@ -108,6 +108,7 @@ if format_name == format_list[0]:
     st.text("Insert instructions here")
     #conf_threshold = st.slider("Confidence threshold", 0.0, 1.0, 0.5, 0.05)
     ice_complete_time = datetime.datetime.now()
+    label_value = 0
 
     class Detection(NamedTuple):
         label: str
@@ -166,33 +167,44 @@ if format_name == format_list[0]:
             result_q.put(detection)
             return av.VideoFrame.from_image(orig)
         else: 
+            st.write(result_q.get())
+            #TODO: 
+            #Add the drawn on with the most frequent label
+            pass
+            #return av.VideoFrame.from_image(orig)
             #calculate the most frequent label 
             #redraw with the most frequent label
-            return None #return the drawn image instead of none
+            #return None #return the drawn image instead of none
     
-    webrtc_ctx = webrtc_streamer(
-        key="object-detection",
-        mode=WebRtcMode.SENDRECV,
-        video_frame_callback=video_frame_callback,
-        media_stream_constraints={"video": True, "audio": False},
-        rtc_configuration=RTC_CONFIGURATION,
-        async_processing=True,
-    )
-
-    if st.checkbox("Show the detected labels", value = True):
+    relabel_chk = st.checkbox("I need to relabel this!", value = False)
+    if relabel_chk == False:
+        webrtc_ctx = webrtc_streamer(
+            key="object-detection",
+            mode=WebRtcMode.SENDRECV,
+            video_frame_callback=video_frame_callback,
+            media_stream_constraints={"video": True, "audio": False},
+            rtc_configuration=RTC_CONFIGURATION,
+            async_processing=True,
+        )
         result = []
         if webrtc_ctx.state.playing:
             labels_placeholder = st.empty()
             while True:
                 result.append(result_q.get()[0])
-                #display the most frequent value at the time of reading the frame
-                #st.write(result_q.get())
-                labels_placeholder.write(max(set(result), key=result.count))
-        else:
-            pass
-
-
-    #test = st.write(results)
+                ##display the most frequent value at the time of reading the frame
+                ##st.write(result_q.get())
+                label_value = max(set(result), key=result.count)
+                #label_value = get_max_label(result)
+                labels_placeholder.write(f"{label_value}")
+    elif relabel_chk == True: 
+        #st.write(f"Testing: {test}")
+        #st.write(f"Your current label: {label_value}")
+        st.text_input("Input the new label here:")
+        #TODO: 
+        #1: Dropdown selection box for specific list
+        #2: Change display based on recognition results
+    else: 
+        pass
 
 if format_name == format_list[1]: 
     st.file_uploader("Upload Your Photos Here:")
